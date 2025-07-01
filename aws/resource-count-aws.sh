@@ -587,7 +587,7 @@ count_account_resources() {
 
     echo "###################################################################################"
     echo "S3 Buckets"
-    for i in "${S3_BUCKETS_LIST[@]}"
+    for i in "${REGION_LIST[@]}"
       do
       RESOURCE_COUNT=$(get_s3_bucket_count "${i}")
       echo "  Count of S3 Buckets in Region ${i}: ${RESOURCE_COUNT}"
