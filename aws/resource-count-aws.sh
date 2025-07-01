@@ -587,8 +587,7 @@ count_account_resources() {
 
     echo "###################################################################################"
     echo "S3 Buckets"
-      S3_BUCKETS_COUNT=$(get_s3_bucket_count)
-      done
+    S3_BUCKETS_COUNT=$(get_s3_bucket_count)
     echo "Total S3 Buckets Count: ${S3_BUCKETS_COUNT}"
     echo "###################################################################################"
     echo ""
