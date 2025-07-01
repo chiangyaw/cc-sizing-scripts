@@ -304,9 +304,13 @@ get_ecs_fargate_task_count() {
 # }
 
 get_s3_bucket_count() {
-  RESULT=0
-  RESULT=$(aws_s3api_list_buckets | jq ', | length' 2>/dev/null)
-  echo "${RESULT}"
+  REGION=$1
+  RESOURCE_COUNT=$(aws_s3api_list_buckets "${REGION}" | jq '. | length' 2>/dev/null)
+  if [[ -z "$RESOURCE_COUNT" || "$RESOURCE_COUNT" -lt 0 ]]; then
+    echo 0
+  else
+    echo "${RESOURCE_COUNT}"
+  fi
 }
 
 get_dynamodb_table_count() {
@@ -583,8 +587,12 @@ count_account_resources() {
 
     echo "###################################################################################"
     echo "S3 Buckets"
-    RESOURCE_COUNT=$(get_s3_bucket_count)
-    S3_BUCKETS_COUNT=$RESOURCE_COUNT
+    for i in "${S3_BUCKETS_LIST[@]}"
+      do
+      RESOURCE_COUNT=$(get_s3_bucket_count "${i}")
+      echo "  Count of S3 Buckets in Region ${i}: ${RESOURCE_COUNT}"
+      S3_BUCKETS_COUNT=$((S3_BUCKETS_COUNT + RESOURCE_COUNT))
+      done
     echo "Total S3 Buckets Count: ${S3_BUCKETS_COUNT}"
     echo "###################################################################################"
     echo ""
