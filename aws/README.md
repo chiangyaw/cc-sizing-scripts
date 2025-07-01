@@ -1,8 +1,8 @@
-# Prisma Cloud AWS License Sizing Script
+# Cortex Cloud AWS License Sizing Script
 
 ## Overview
 
-This document describes how to prepare for, and how to run the Prisma Cloud AWS License Sizing Script.
+This document describes how to prepare for, and how to run the Cortex Cloud AWS License Sizing Script.
 
 ## Prerequisites
 
@@ -19,6 +19,7 @@ The below AWS APIs need to be enabled in order to gather information from AWS.
 * aws sts assume-role (optional, when running as `resource-count-aws.sh org`)
 * aws ec2 describe-instances
 * aws rds describe-db-instances
+* aws dynamodb list-tables
 * aws redshift describe-clusters
 * aws lambda get-account-settings
 * aws s3api list-buckets
@@ -28,7 +29,6 @@ the below AWS APIs are no longer required:
 * aws elb describe-load-balancer
 * aws ecs list-clusters (optional, when running as `resource-count-aws.sh cwp`)
 * aws ecs list-tasks (optional, when running as `resource-count-aws.sh cwp`)
-* aws s3api list-buckets (optional, when running as `resource-count-aws.sh data`)
 * aws s3api list-objects (optional, when running as `resource-count-aws.sh data`)
 
 ## AWS Organization Support
@@ -96,11 +96,11 @@ Follow the steps below to install prerequisites, if you plan to run the script o
 
 ### Executing the Script on Windows
 
-Follow the steps below to run the Prisma Cloud AWS License Sizing Script on Windows.
+Follow the steps below to run the Cortex Cloud AWS License Sizing Script on Windows.
 
 1. Download the sizing script to your local computer
-    1. Create a "Prisma Cloud" folder on your local Windows drive ("C:\Prisma Cloud" in this example)
-    1. Download the Prisma Cloud licensing script to the new Prisma Cloud folder
+    1. Create a "Cortex Cloud" folder on your local Windows drive ("C:\Cortex Cloud" in this example)
+    1. Download the Cortex Cloud licensing script to the new Cortex Cloud folder
     1. [resource-count-aws.sh](resource-count-aws.sh)
 1. Execute the sizing script in your Linux distribution
     1. If the Ubuntu shell is not open, launch it from the Start menu
@@ -109,8 +109,8 @@ Follow the steps below to run the Prisma Cloud AWS License Sizing Script on Wind
         1. Provide the AWS Secret Key for the AWS account you want to analyze
         1. Set the default region to none
         1. Set the output format to none
-    1. Run the following command to mount the local Windows c:\Prisma Cloud drive in Ubuntu
-        1. `cd /mnt/c/Prisma\ Cloud`
+    1. Run the following command to mount the local Windows c:\Cortex Cloud drive in Ubuntu
+        1. `cd /mnt/c/Cortex\ Cloud`
     1. Run the following command to run the sizing script
         1. `./resource-count-aws.sh`
 1. Share the results with your Palo Alto Networks Team
@@ -143,8 +143,8 @@ Follow the steps below to install prerequisites, if you plan to run the script o
 
 ### Executing the Script on Mac OSX or Linux
 
-1. Download the Prisma Cloud AWS License Sizing Script
-    1. Download the Prisma Cloud licensing script to your local drive ("Downloads" in this example)
+1. Download the Cortex Cloud AWS License Sizing Script
+    1. Download the Cortex Cloud licensing script to your local drive ("Downloads" in this example)
 1. Execute the sizing script
     1. Start a Terminal session
     1. Run `aws configure` to connect to your AWS account
