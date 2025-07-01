@@ -175,7 +175,7 @@ gcloud_run_services_list() {
 
 gcloud_artifacts_docker_images_list() {
   # shellcheck disable=SC2086
-  RESULT=$(gcloud artifacts docker images list "us-central1-docker.pkg.dev/${1}/gcr.io" --include-tags --format json $VERBOSITY_ARGS 2>/dev/null)
+  RESULT=$(gcloud artifacts docker images list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
   if [ $? -eq 0 ]; then
     echo "${RESULT}"
   fi
