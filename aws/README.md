@@ -23,6 +23,8 @@ The below AWS APIs need to be enabled in order to gather information from AWS.
 * aws redshift describe-clusters
 * aws lambda get-account-settings
 * aws s3api list-buckets
+* aws ecr describe-repositories
+* aws ecr describe-images
 
 the below AWS APIs are no longer required:
 * aws ec2 describe-nat-gateways

@@ -24,6 +24,8 @@
 # - aws lambda get-account-settings
 # - aws ecs list-tasks
 # - aws s3api list-buckets 
+# - aws ecr describe-repositories
+# - aws ecr describe-images
 ##########################################################################################
 
 ##########################################################################################

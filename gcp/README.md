@@ -27,6 +27,8 @@ The below GCP APIs need to be enabled in order to gather information from GCP.
 * gcloud firestore databases list
 * gcloud functions list
 * gcloud run services list
+* gcloud artifacts repositories list
+* gcloud artifacts docker images list
 
 ### Verbose Mode
 
