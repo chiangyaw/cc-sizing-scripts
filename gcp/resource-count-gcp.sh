@@ -173,9 +173,17 @@ gcloud_run_services_list() {
   fi
 }
 
-gcloud_artifacts_docker_images_list() {
+gcloud_artifacts_repositories_list() {
   # shellcheck disable=SC2086
-  RESULT=$(gcloud artifacts docker images list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
+  RESULT=$(gcloud artifacts repositories list --project "${1}" --location="asia-southeast1" --format json $VERBOSITY_ARGS 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  fi
+}
+
+gcloud_artifacts_images_list_by_repo() {
+  # shellcheck disable=SC2086
+  RESULT=$(gcloud artifacts docker images list "${2}-docker.pkg.dev/${1}/${3}" --format json $VERBOSITY_ARGS 2>/dev/null)
   if [ $? -eq 0 ]; then
     echo "${RESULT}"
   fi
@@ -284,9 +292,23 @@ count_project_resources() {
     CLOUD_RUN_COUNT=$((CLOUD_RUN_COUNT + RESOURCE_COUNT))
     echo "  Count of Cloud Run Services: ${CLOUD_RUN_COUNT}"
 
-    RESOURCE_COUNT=$(gcloud_artifacts_docker_images_list "${PROJECT}" | jq '.[].name' | wc -l)
-    ACR_IMAGES_COUNT=$((ACR_IMAGES_COUNT + RESOURCE_COUNT))
+    REPOSITORIES=($(gcloud_artifacts_repositories_list "${PROJECT}" | jq -r '.[].name'))
+    ACR_IMAGES_COUNT=0
+    for REPO_URL in "${REPOSITORIES[@]}"
+    do
+      REPO_NAME=$(echo "${REPO_URL}" | cut -d'/' -f6)
+      REPO_LOCATION=$(echo "${REPO_URL}" | cut -d'/' -f4)
+      REPO_FORMAT=$(gcloud artifacts repositories describe "${REPO_NAME}" --location="${REPO_LOCATION}" --project="${PROJECT}" --format="value(format)" 2>/dev/null)
+      if [ "${REPO_FORMAT}" == "DOCKER" ]; then
+        RESOURCE_COUNT=$(gcloud_artifacts_images_list_by_repo "${PROJECT}" "${REPO_LOCATION}" "${REPO_NAME}" | jq '.[].name' | wc -l)
+        ACR_IMAGES_COUNT=$((ACR_IMAGES_COUNT + RESOURCE_COUNT))
+      fi
+    done
     echo "  Count of Artifact Registry Images: ${ACR_IMAGES_COUNT}"
+
+    # RESOURCE_COUNT=$(gcloud_artifacts_docker_images_list "${PROJECT}" | jq '.[].name' | wc -l)
+    # ACR_IMAGES_COUNT=$((ACR_IMAGES_COUNT + RESOURCE_COUNT))
+    # echo "  Count of Artifact Registry Images: ${ACR_IMAGES_COUNT}"
 
     # WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + SQL_INSTANCES_COUNT + STORAGE_COUNT + FILESTORE_COUNT + BIGQUERY_COUNT + BIGTABLE_COUNT + SPANNER_COUNT + REDIS_COUNT + MEMCACHE_COUNT + FIRESTORE_COUNT))
     # echo "Total billable resources for Project ${PROJECTS[$PROJECT_INDEX]}: ${WORKLOAD_COUNT}"
