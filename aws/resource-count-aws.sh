@@ -305,7 +305,7 @@ get_ecs_fargate_task_count() {
 
 get_s3_bucket_count() {
   RESULT=0
-  S3_BUCKETS_COUNT=$(aws_s3api_list_buckets | jq ', | length' 2>/dev/null)
+  RESULT=$(aws_s3api_list_buckets | jq ', | length' 2>/dev/null)
   echo "${RESULT}"
 }
 
