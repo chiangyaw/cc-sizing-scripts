@@ -37,6 +37,8 @@
 # - gcloud redis instances list
 # - gcloud memcache instances list
 # - gcloud firestore databases list
+# - gcloud artifacts repositories list
+# - gcloud artifacts docker images list
 ##########################################################################################
 
 ##########################################################################################
@@ -171,6 +173,14 @@ gcloud_run_services_list() {
   fi
 }
 
+gcloud_artifacts_docker_images_list() {
+  # shellcheck disable=SC2086
+  RESULT=$(gcloud artifacts docker images list "us-central1-docker.pkg.dev/${1}/gcr.io" --include-tags --format json $VERBOSITY_ARGS 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  fi
+}
+
 get_project_list() {
   PROJECTS=($(gcloud_projects_list | jq  -r '.[].projectId'))
   TOTAL_PROJECTS=${#PROJECTS[@]}
@@ -194,6 +204,7 @@ reset_project_counters() {
   FIRESTORE_COUNT=0
   CLOUD_FUNCTIONS_COUNT=0
   CLOUD_RUN_COUNT=0
+  ACR_IMAGES_COUNT=0
 }
 
 reset_global_counters() {
@@ -210,6 +221,7 @@ reset_global_counters() {
   FIRESTORE_COUNT_GLOBAL=0
   CLOUD_FUNCTIONS_COUNT_GLOBAL=0
   CLOUD_RUN_COUNT_GLOBAL=0
+  ACR_IMAGES_COUNT_GLOBAL=0
 }
 
 ##########################################################################################
@@ -272,6 +284,10 @@ count_project_resources() {
     CLOUD_RUN_COUNT=$((CLOUD_RUN_COUNT + RESOURCE_COUNT))
     echo "  Count of Cloud Run Services: ${CLOUD_RUN_COUNT}"
 
+    RESOURCE_COUNT=$(gcloud_artifacts_docker_images_list "${PROJECT}" | jq '.[].name' | wc -l)
+    ACR_IMAGES_COUNT=$((ACR_IMAGES_COUNT + RESOURCE_COUNT))
+    echo "  Count of Artifact Registry Images: ${ACR_IMAGES_COUNT}"
+
     # WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + SQL_INSTANCES_COUNT + STORAGE_COUNT + FILESTORE_COUNT + BIGQUERY_COUNT + BIGTABLE_COUNT + SPANNER_COUNT + REDIS_COUNT + MEMCACHE_COUNT + FIRESTORE_COUNT))
     # echo "Total billable resources for Project ${PROJECTS[$PROJECT_INDEX]}: ${WORKLOAD_COUNT}"
     echo "###################################################################################"
@@ -289,6 +305,7 @@ count_project_resources() {
     FIRESTORE_COUNT_GLOBAL=$((FIRESTORE_COUNT_GLOBAL + FIRESTORE_COUNT))
     CLOUD_FUNCTIONS_COUNT_GLOBAL=$((CLOUD_FUNCTIONS_COUNT_GLOBAL + CLOUD_FUNCTIONS_COUNT))
     CLOUD_RUN_COUNT_GLOBAL=$((CLOUD_RUN_COUNT_GLOBAL + CLOUD_RUN_COUNT))
+    ACR_IMAGES_COUNT_GLOBAL=$((ACR_IMAGES_COUNT_GLOBAL + ACR_IMAGES_COUNT))
 
     reset_project_counters
   done
@@ -307,6 +324,7 @@ count_project_resources() {
   echo "  Count of Firestore: ${FIRESTORE_COUNT_GLOBAL}"
   echo "  Count of Cloud Functions: ${CLOUD_FUNCTIONS_COUNT_GLOBAL}"
   echo "  Count of Cloud Run Services: ${CLOUD_RUN_COUNT_GLOBAL}"
+  echo "  Count of Artifact Registry Images: ${ACR_IMAGES_COUNT_GLOBAL}"
 
   # WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + SQL_INSTANCES_COUNT_GLOBAL + STORAGE_COUNT_GLOBAL + FILESTORE_COUNT_GLOBAL + BIGQUERY_COUNT_GLOBAL + BIGTABLE_COUNT_GLOBAL + SPANNER_COUNT_GLOBAL + REDIS_COUNT_GLOBAL + MEMCACHE_COUNT_GLOBAL + FIRESTORE_COUNT_GLOBAL))
   # echo "Total billable resources for all projects: ${WORKLOAD_COUNT_GLOBAL}"
