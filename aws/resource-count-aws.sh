@@ -230,6 +230,24 @@ aws_dynamodb_list_tables() {
   fi
 }
 
+aws_ecr_describe_repositories() {
+  RESULT=$(aws ecr describe-repositories --region="${1}" --output json 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '{"repositories": [] }'
+  fi
+}
+
+aws_ecr_describe_images() {
+  RESULT=$(aws ecr describe-images --repository-name "${2}" --region="${1}" --output json 2>/dev/null)
+  if [ $? -eq 0 ]; then
+    echo "${RESULT}"
+  else
+    echo '{"imageDetails": [] }'
+  fi
+}
+
 # aws_s3_ls_bucket_size() {
 #   RESULT=$(aws s3api list-objects --bucket "${1}" --output json --query "sum(Contents[].Size)" 2>/dev/null)
 #   if [ $? -eq 0 ]; then
@@ -321,6 +339,28 @@ get_dynamodb_table_count() {
   else
     echo "${RESOURCE_COUNT}"
   fi
+}
+
+get_ecr_image_count_in_region() {
+  REGION=$1
+  TOTAL_IMAGES_IN_REGION=0
+  ECR_REPOSITORIES=$(aws_ecr_describe_repositories "${REGION}" | jq -r '.repositories[].repositoryName' 2>/dev/null)
+  if [ -z "${ECR_REPOSITORIES}" ]; then
+    echo 0
+    return
+  fi
+  XIFS=$IFS
+  # shellcheck disable=SC2206
+  IFS=$'\n' ECR_REPO_LIST=($ECR_REPOSITORIES)
+  IFS=$XIFS
+
+  for REPO_NAME in "${ECR_REPO_LIST[@]}"
+  do
+    IMAGE_COUNT_IN_REPO=$(aws_ecr_describe_images "${REGION}" "${REPO_NAME}" | jq '.imageDetails | length' 2>/dev/null)
+    TOTAL_IMAGES_IN_REGION=$((TOTAL_IMAGES_IN_REGION + IMAGE_COUNT_IN_REPO))
+  done
+  
+  echo "${TOTAL_IMAGES_IN_REGION}"
 }
 
 ####
@@ -426,6 +466,7 @@ reset_account_counters() {
   # S3_BUCKETS_SIZE=0
   S3_BUCKETS_COUNT=0
   DYNAMODB_TABLE_COUNT=0
+  ECR_IMAGE_COUNT=0
 }
 
 reset_global_counters() {
@@ -445,6 +486,7 @@ reset_global_counters() {
   # LAMBDA_CREDIT_USAGE_GLOBAL=0
   # COMPUTE_CREDIT_USAGE_GLOBAL=0
   DYNAMODB_TABLE_COUNT_GLOBAL=0
+  ECR_IMAGE_COUNT_GLOBAL=0
 }
 
 ##########################################################################################
@@ -560,6 +602,18 @@ count_account_resources() {
     echo "###################################################################################"
     echo ""
 
+    echo "###################################################################################"
+    echo "ECR Container Images"
+    for i in "${REGION_LIST[@]}"
+    do
+      RESOURCE_COUNT=$(get_ecr_image_count_in_region "${i}")
+      echo "  Count of ECR Container Images in Region ${i}: ${RESOURCE_COUNT}"
+      ECR_IMAGE_COUNT=$((ECR_IMAGE_COUNT + RESOURCE_COUNT))
+    done
+    echo "Total ECR Container Images across all regions: ${ECR_IMAGE_COUNT}"
+    echo "###################################################################################"
+    echo ""
+
     # echo "###################################################################################"
     # echo "EKS Clusters"
     # for i in "${REGION_LIST[@]}"
@@ -617,6 +671,7 @@ count_account_resources() {
     ECS_FARGATE_TASK_COUNT_GLOBAL=$((ECS_FARGATE_TASK_COUNT_GLOBAL + ECS_FARGATE_TASK_COUNT))
     # S3_BUCKETS_SIZE_GLOBAL=$((S3_BUCKETS_SIZE_GLOBAL + S3_BUCKETS_SIZE))
     S3_BUCKETS_COUNT_GLOBAL=$((S3_BUCKETS_COUNT_GLOBAL + S3_BUCKETS_COUNT))
+    ECR_IMAGE_COUNT_GLOBAL=$((ECR_IMAGE_COUNT_GLOBAL + ECR_IMAGE_COUNT))
 
     reset_account_counters
 
@@ -637,6 +692,7 @@ count_account_resources() {
   echo "  Count of DynamoDB Tables:   ${DYNAMODB_TABLE_COUNT_GLOBAL}"
   echo "  Count of Lambda Functions: ${LAMBDA_COUNT_GLOBAL}"
   echo "  Count of ECS Fargate Tasks: ${ECS_FARGATE_TASK_COUNT_GLOBAL}"
+  echo "  Count of ECR Container Images: ${ECR_IMAGE_COUNT_GLOBAL}"
   echo "  Count of S3 Buckets: ${S3_BUCKETS_COUNT_GLOBAL}"
   # echo "  Count of Maximum EKS Cluster Nodes: ${EKS_CLUSTER_NODE_COUNT}"
   # echo "  Count of ELBs:              ${ELB_COUNT_GLOBAL}"
