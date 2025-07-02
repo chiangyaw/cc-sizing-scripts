@@ -1,8 +1,8 @@
-# Prisma Cloud GCP License Sizing Script
+# Cortex Cloud GCP License Sizing Script
 
 ## Overview
 
-This document describes how to prepare for, and how to run the Prisma Cloud GCP License Sizing Script.
+This document describes how to prepare for, and how to run the Cortex Cloud GCP License Sizing Script.
 
 ## Prerequisites
 
@@ -36,7 +36,7 @@ By default, the sizing script will run in quiet mode. If you wish to enable verb
 
 ## Running the Script
 
-Follow the steps below to run the Prisma Cloud GCP License Sizing Script.
+Follow the steps below to run the Cortex Cloud GCP License Sizing Script.
 
 1. Download the sizing script to your local computer
     1. [resource-count-gcp.sh](resource-count-gcp.sh)
