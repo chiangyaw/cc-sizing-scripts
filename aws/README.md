@@ -57,8 +57,8 @@ https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_accounts_
 ## Running the Script from AWS Cloud Shell
 
 1. Start a Cloud Shell session from the AWS UI, which should have the AWS CLI tool, your credentials, ```git``` and ``jq`` already prepared
-2. Clone this repository, e.g. ```git clone https://github.com/PaloAltoNetworks/pcs-sizing-scripts.git```
-3. ```cd pcs-sizing-scripts/aws```
+2. Clone this repository, e.g. ```git clone https://github.com/chiangyaw/cc-sizing-scripts.git```
+3. ```cd cc-sizing-scripts/aws```
 4. ```chmod +x  resource-count-aws.sh```
 5. ```./resource-count-aws.sh```
 
