@@ -5,7 +5,6 @@ This is an UNOFFICIAL sizing script for Cortex Cloud. The main usage of the Cort
 * Please refer to the individual folders for instructions on running these scripts for each cloud provider/usage.
 
 ## Cloud Providers:
-
 * [AWS](/aws) 
 * [GCP](/gcp)
 * [Azure](/azure)
