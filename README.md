@@ -8,8 +8,10 @@ This is an UNOFFICIAL sizing script for Cortex Cloud. The main usage of the Cort
 
 * [AWS](/aws) 
 * [GCP](/gcp)
+* [Azure](/azure)
 
 ### Work In Progress
-* [Azure](/azure)
 * [OCI](/oci)
 * [Alibaba](/alibaba)
+
+Note: These scripts are modified from the original pcs-sizing-script [here](https://github.com/PaloAltoNetworks/pcs-sizing-scripts).
