@@ -1,8 +1,8 @@
-# Prisma Cloud Azure License Sizing Script
+# Cortex Cloud Azure License Sizing Script
 
 ## Overview
 
-This document describes how to prepare for and run the Prisma Cloud Azure License Sizing Script.
+This document describes how to prepare for and run the Cortex Cloud Azure License Sizing Script.
 
 ## Prerequisites
 
