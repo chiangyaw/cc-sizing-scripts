@@ -14,10 +14,11 @@ The GCP account that is used to run the sizing script must have the required per
 
 The below GCP APIs need to be enabled in order to gather information from GCP.
 
+* gcloud projects describe
 * gcloud projects list
+* gcloud resource-manager folders describe
 * gcloud compute instances list
 * gcloud sql instances list
-* gcloud storage ls
 * gcloud filestore instances list
 * gcloud alpha bq datasets list
 * gcloud bigtable instances list
@@ -27,6 +28,7 @@ The below GCP APIs need to be enabled in order to gather information from GCP.
 * gcloud firestore databases list
 * gcloud functions list
 * gcloud run services list
+* gcloud storage ls
 * gcloud artifacts repositories list
 * gcloud artifacts docker images list
 
