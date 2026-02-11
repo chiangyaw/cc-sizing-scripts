@@ -39,13 +39,13 @@ By default, the sizing script will run in quiet mode. If you wish to enable verb
 Follow the steps below to run the Cortex Cloud GCP License Sizing Script.
 
 1. Download the sizing script to your local computer
-    i. [resource-count-gcp.sh](resource-count-gcp.sh)
+    * [resource-count-gcp.sh](resource-count-gcp.sh)
 2. Log into your GCP Console
 3. Launch the GCP Cloud Shell
 1. Click the Vertical Ellipsis on the right side of your GCP Console
 4. Select "Upload File"
 5. Upload the sizing script to your GCP Cloud Shell
-6. Run the sizing script. Optionally, you can add `--project` or `--folder` flag, so that the script only cover the specific project or folder.
-    i. `chmod +x resource-count-gcp.sh`
-    ii. `./resource-count-gcp.sh`
+6. Run the sizing script. Optionally, you can add `--project` or `--folder` flag with project or folder ID, so that the script only cover the specific project or folder.
+    * `chmod +x resource-count-gcp.sh`
+    * `./resource-count-gcp.sh`
 7. Share the results with your Palo Alto Networks team
