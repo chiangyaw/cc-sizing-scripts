@@ -2,368 +2,150 @@
 
 # shellcheck disable=SC2102,SC2181,SC2207
 
-# Instructions:
-#
-# - Go to the GCP Console
-#
-# - Open Cloud Shell >_
-#
-# - Click on three dot vertical menu on the right side (left of minimize button)
-#
-# - Upload this script
-#
-# - Make this script executable:
-#   chmod +x resource-count-gcp.sh
-#
-# - Run this script:
-#   resource-count-gcp.sh
-#   resource-count-gcp.sh verbose (see below)
-#
-# This script may generate errors when:
-#
-# - The API is not enabled (and gcloud prompts you to enable the API).
-# - You don't have permission to make the API calls.
-#
-# API/CLI used:
-#
-# - gcloud projects list
-# - gcloud compute instances list
-# - gcloud sql instances list
-# - gcloud storage ls 
-# - gcloud filestore instances list
-# - gcloud alpha bq datasets list
-# - gcloud bigtable instances list 
-# - gcloud spanner instances list
-# - gcloud redis instances list
-# - gcloud memcache instances list
-# - gcloud firestore databases list
-# - gcloud artifacts repositories list
-# - gcloud artifacts docker images list
-##########################################################################################
-
-##########################################################################################
-## Use of jq is required by this script.
-##########################################################################################
-
 if ! type "jq" > /dev/null; then
-  echo "Error: jq not installed or not in execution path, jq is required for script execution."
+  echo "Error: jq is required."
   exit 1
 fi
 
-##########################################################################################
-## Optionally enable verbose mode by passing "verbose" as an argument.
-##########################################################################################
+USAGE="Usage: $0 [--project PROJECT_ID] [--folder FOLDER_ID] [--verbose]"
+VERBOSE=false
+SCAN_PROJECT=""
+SCAN_FOLDER=""
 
-# By default:
-#
-# - You will not be prompted to enable an API (we assume that you don't use the service, thus resource count is assumed to be 0).
-# - When an error is encountered, you most likely don't have API access, thus resource count is assumed to be 0).
+# Manual argument parsing for long options
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --project)
+      SCAN_PROJECT="$2"
+      shift 2
+      ;;
+    --folder)
+      SCAN_FOLDER="$2"
+      shift 2
+      ;;
+    --verbose)
+      VERBOSE=true
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "$USAGE"
+      exit 1
+      ;;
+  esac
+done
 
-if [ "${1}X" == "verboseX" ]; then
+if [ "$VERBOSE" = true ]; then
   VERBOSITY_ARGS="--verbosity error"
 else
   VERBOSITY_ARGS="--verbosity critical --quiet"
 fi
 
+# Validation Logic
+if [ -n "$SCAN_PROJECT" ]; then
+    if ! gcloud projects describe "$SCAN_PROJECT" &>/dev/null; then
+        echo "Error: Project '$SCAN_PROJECT' not found or you lack permissions."
+        exit 1
+    fi
+    PROJECTS=("$SCAN_PROJECT")
+elif [ -n "$SCAN_FOLDER" ]; then
+    if ! gcloud resource-manager folders describe "$SCAN_FOLDER" &>/dev/null; then
+        echo "Error: Folder '$SCAN_FOLDER' not found or you lack permissions."
+        exit 1
+    fi
+    echo "Fetching projects in folder $SCAN_FOLDER..."
+    PROJECTS=($(gcloud projects list --filter="parent.id=$SCAN_FOLDER" --format="value(projectId)"))
+else
+    echo "Fetching all accessible projects..."
+    PROJECTS=($(gcloud projects list --format="value(projectId)"))
+fi
+
+if [ ${#PROJECTS[@]} -eq 0 ]; then
+    echo "Error: No projects found to scan."
+    exit 1
+fi
+
+RESULT_DIR=$(mktemp -d)
+trap 'rm -rf "$RESULT_DIR"' EXIT
+
 ##########################################################################################
-## GCP Utility functions.
+## Worker Function
 ##########################################################################################
 
-gcloud_projects_list() {
-  RESULT=$(gcloud projects list --format json 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
+process_project_parallel() {
+    local PJ=$1
+    local OUT_FILE="$RESULT_DIR/$PJ.results"
+    
+    # Resource Counting
+    local C_COMPUTE=$(gcloud compute instances list --filter="status:(RUNNING)" --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_SQL=$(gcloud sql instances list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_FILER=$(gcloud filestore instances list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_BQ=$(gcloud alpha bq datasets list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_BT=$(gcloud bigtable instances list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_SPANNER=$(gcloud spanner instances list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_REDIS=$(gcloud redis instances list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_MEMCACHE=$(gcloud memcache instances list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_FIRESTORE=$(gcloud firestore databases list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_FUNCTIONS=$(gcloud functions list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_RUN=$(gcloud run services list --project "$PJ" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+    local C_STORAGE=$(gcloud storage ls --project "$PJ" $VERBOSITY_ARGS 2>/dev/null | wc -l)
 
-gcloud_compute_instances_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud compute instances list --filter="status:(RUNNING)" --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
+    # Artifact Registry Logic
+    local C_ARTIFACTS=0
+    local REPOS=$(gcloud artifacts repositories list --project "$PJ" --format="value(name,location,format)" $VERBOSITY_ARGS 2>/dev/null)
+    while read -r REPO_LINE; do
+        [ -z "$REPO_LINE" ] && continue
+        local R_NAME=$(echo "$REPO_LINE" | awk '{print $1}')
+        local R_LOC=$(echo "$REPO_LINE" | awk '{print $2}')
+        local R_FMT=$(echo "$REPO_LINE" | awk '{print $3}')
+        
+        if [ "$R_FMT" == "DOCKER" ]; then
+            local IMG_COUNT=$(gcloud artifacts docker images list "$R_LOC-docker.pkg.dev/$PJ/$R_NAME" --format json $VERBOSITY_ARGS 2>/dev/null | jq '. | length')
+            C_ARTIFACTS=$((C_ARTIFACTS + IMG_COUNT))
+        fi
+    done <<< "$REPOS"
 
-gcloud_sql_instances_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud sql instances list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_storage_ls() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud storage ls --project "${1}" $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_filestore_instance_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud filestore instances list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_alpha_bq_datasets_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud alpha bq datasets list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_bigtable_instances_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud bigtable instances list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_spanner_instances_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud spanner instances list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_redis_instances_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud redis instances list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_memcache_instances_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud memcache instances list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_firestore_databases_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud firestore databases list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-####
-
-gcloud_functions_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud functions list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_run_services_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud run services list --project "${1}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_artifacts_repositories_list() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud artifacts repositories list --project "${1}" --location="asia-southeast1" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-gcloud_artifacts_images_list_by_repo() {
-  # shellcheck disable=SC2086
-  RESULT=$(gcloud artifacts docker images list "${2}-docker.pkg.dev/${1}/${3}" --format json $VERBOSITY_ARGS 2>/dev/null)
-  if [ $? -eq 0 ]; then
-    echo "${RESULT}"
-  fi
-}
-
-get_project_list() {
-  PROJECTS=($(gcloud_projects_list | jq  -r '.[].projectId'))
-  TOTAL_PROJECTS=${#PROJECTS[@]}
+    # Export metrics as a single line for easy reading
+    echo "COMPUTE=$C_COMPUTE;SQL=$C_SQL;STORAGE=$C_STORAGE;FILER=$C_FILER;BQ=$C_BQ;BT=$C_BT;SPANNER=$C_SPANNER;REDIS=$C_REDIS;MEM=$C_MEMCACHE;FS=$C_FIRESTORE;FUNC=$C_FUNCTIONS;RUN=$C_RUN;ART=$C_ARTIFACTS" > "$OUT_FILE"
+    
+    echo "[DONE] Finished Project: $PJ"
 }
 
 ##########################################################################################
-## Set or reset counters.
+## Main Execution
 ##########################################################################################
 
-reset_project_counters() {
-  COMPUTE_INSTANCES_COUNT=0
-  SQL_INSTANCES_COUNT=0
-  # WORKLOAD_COUNT=0
-  STORAGE_COUNT=0
-  FILESTORE_COUNT=0
-  BIGQUERY_COUNT=0
-  BIGTABLE_COUNT=0
-  SPANNER_COUNT=0
-  REDIS_COUNT=0
-  MEMCACHE_COUNT=0
-  FIRESTORE_COUNT=0
-  CLOUD_FUNCTIONS_COUNT=0
-  CLOUD_RUN_COUNT=0
-  ACR_IMAGES_COUNT=0
-}
+echo "Starting parallel scan of ${#PROJECTS[@]} projects..."
 
-reset_global_counters() {
-  COMPUTE_INSTANCES_COUNT_GLOBAL=0
-  SQL_INSTANCES_COUNT_GLOBAL=0
-  # WORKLOAD_COUNT_GLOBAL=0
-  STORAGE_COUNT_GLOBAL=0
-  FILESTORE_COUNT_GLOBAL=0
-  BIGQUERY_COUNT_GLOBAL=0
-  BIGTABLE_COUNT_GLOBAL=0
-  SPANNER_COUNT_GLOBAL=0
-  REDIS_COUNT_GLOBAL=0
-  MEMCACHE_COUNT_GLOBAL=0
-  FIRESTORE_COUNT_GLOBAL=0
-  CLOUD_FUNCTIONS_COUNT_GLOBAL=0
-  CLOUD_RUN_COUNT_GLOBAL=0
-  ACR_IMAGES_COUNT_GLOBAL=0
-}
+for PROJECT in "${PROJECTS[@]}"; do
+    process_project_parallel "$PROJECT" &
+    # Limit to 10 parallel jobs to avoid Cloud Shell/API throttling
+    while [ $(jobs -r | wc -l) -ge 10 ]; do sleep 1; done
+done
+wait
 
-##########################################################################################
-## Iterate through the projects, and billable resource types.
-##########################################################################################
+# Aggregate Results
+G_COMPUTE=0; G_SQL=0; G_STORAGE=0; G_FILER=0; G_BQ=0; G_BT=0; G_SPANNER=0; G_REDIS=0; G_MEM=0; G_FS=0; G_FUNC=0; G_RUN=0; G_ART=0
 
-count_project_resources() {
-  for ((PROJECT_INDEX=0; PROJECT_INDEX<=(TOTAL_PROJECTS-1); PROJECT_INDEX++))
-  do
-    PROJECT="${PROJECTS[$PROJECT_INDEX]}"
+for f in "$RESULT_DIR"/*.results; do
+    [ -e "$f" ] || continue
+    IFS=';' read -r C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 C11 C12 C13 < "$f"
+    eval "$C1"; eval "$C2"; eval "$C3"; eval "$C4"; eval "$C5"; eval "$C6"; eval "$C7"; eval "$C8"; eval "$C9"; eval "$C10"; eval "$C11"; eval "$C12"; eval "$C13"
+    
+    G_COMPUTE=$((G_COMPUTE + COMPUTE)); G_SQL=$((G_SQL + SQL)); G_STORAGE=$((G_STORAGE + STORAGE))
+    G_FILER=$((G_FILER + FILER)); G_BQ=$((G_BQ + BQ)); G_BT=$((G_BT + BT))
+    G_SPANNER=$((G_SPANNER + SPANNER)); G_REDIS=$((G_REDIS + REDIS)); G_MEM=$((G_MEM + MEM))
+    G_FS=$((G_FS + FS)); G_FUNC=$((G_FUNC + FUNC)); G_RUN=$((G_RUN + RUN)); G_ART=$((G_ART + ART))
+done
 
-    echo "###################################################################################"
-    echo "Processing Project: ${PROJECT}"
+# Calculate Grand Total
+GRAND_TOTAL=$((G_COMPUTE + G_SQL + G_STORAGE + G_FILER + G_BQ + G_BT + G_SPANNER + G_REDIS + G_MEM + G_FS + G_FUNC + G_RUN + G_ART))
 
-    RESOURCE_COUNT=$(gcloud_compute_instances_list "${PROJECT}" | jq '.[].name' | wc -l)
-    COMPUTE_INSTANCES_COUNT=$((COMPUTE_INSTANCES_COUNT + RESOURCE_COUNT))
-    echo "  Count of Running Compute Instances: ${COMPUTE_INSTANCES_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_sql_instances_list "${PROJECT}" | jq '.[].name' | wc -l)
-    SQL_INSTANCES_COUNT=$((SQL_INSTANCES_COUNT + RESOURCE_COUNT))
-    echo "  Count of SQL Instances: ${SQL_INSTANCES_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_storage_ls "${PROJECT}" | wc -l)
-    STORAGE_COUNT=$((STORAGE_COUNT + RESOURCE_COUNT))
-    echo "  Count of Storage Buckets: ${STORAGE_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_filestore_instance_list "${PROJECT}" | jq '.[].name' | wc -l)
-    FILESTORE_COUNT=$((FILESTORE_COUNT + RESOURCE_COUNT))
-    echo "  Count of Filestore: ${FILESTORE_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_alpha_bq_datasets_list "${PROJECT}" | jq '.[].name' | wc -l)
-    BIGQUERY_COUNT=$((BIGQUERY_COUNT + RESOURCE_COUNT))
-    echo "  Count of BigQuery: ${BIGQUERY_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_bigtable_instances_list "${PROJECT}" | jq '.[].name' | wc -l)
-    BIGTABLE_COUNT=$((BIGTABLE_COUNT + RESOURCE_COUNT))
-    echo "  Count of BigTable: ${BIGTABLE_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_spanner_instances_list "${PROJECT}" | jq '.[].name' | wc -l)
-    SPANNER_COUNT=$((SPANNER_COUNT + RESOURCE_COUNT))
-    echo "  Count of Spanner: ${SPANNER_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_redis_instances_list "${PROJECT}" | jq '.[].name' | wc -l)
-    REDIS_COUNT=$((REDIS_COUNT + RESOURCE_COUNT))
-    echo "  Count of Redis: ${REDIS_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_memcache_instances_list "${PROJECT}" | jq '.[].name' | wc -l)
-    MEMCACHE_COUNT=$((MEMCACHE_COUNT + RESOURCE_COUNT))
-    echo "  Count of Memcache: ${MEMCACHE_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_firestore_databases_list "${PROJECT}" | jq '.[].name' | wc -l)
-    FIRESTORE_COUNT=$((FIRESTORE_COUNT + RESOURCE_COUNT))
-    echo "  Count of Firestore: ${FIRESTORE_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_functions_list "${PROJECT}" | jq '.[].name' | wc -l)
-    CLOUD_FUNCTIONS_COUNT=$((CLOUD_FUNCTIONS_COUNT + RESOURCE_COUNT))
-    echo "  Count of Cloud Functions: ${CLOUD_FUNCTIONS_COUNT}"
-
-    RESOURCE_COUNT=$(gcloud_run_services_list "${PROJECT}" | jq '.[].name' | wc -l)
-    CLOUD_RUN_COUNT=$((CLOUD_RUN_COUNT + RESOURCE_COUNT))
-    echo "  Count of Cloud Run Services: ${CLOUD_RUN_COUNT}"
-
-    REPOSITORIES=($(gcloud_artifacts_repositories_list "${PROJECT}" | jq -r '.[].name'))
-    ACR_IMAGES_COUNT=0
-    for REPO_URL in "${REPOSITORIES[@]}"
-    do
-      REPO_NAME=$(echo "${REPO_URL}" | cut -d'/' -f6)
-      REPO_LOCATION=$(echo "${REPO_URL}" | cut -d'/' -f4)
-      REPO_FORMAT=$(gcloud artifacts repositories describe "${REPO_NAME}" --location="${REPO_LOCATION}" --project="${PROJECT}" --format="value(format)" 2>/dev/null)
-      if [ "${REPO_FORMAT}" == "DOCKER" ]; then
-        RESOURCE_COUNT=$(gcloud_artifacts_images_list_by_repo "${PROJECT}" "${REPO_LOCATION}" "${REPO_NAME}" | jq '.[].name' | wc -l)
-        ACR_IMAGES_COUNT=$((ACR_IMAGES_COUNT + RESOURCE_COUNT))
-      fi
-    done
-    echo "  Count of Artifact Registry Images: ${ACR_IMAGES_COUNT}"
-
-    # RESOURCE_COUNT=$(gcloud_artifacts_docker_images_list "${PROJECT}" | jq '.[].name' | wc -l)
-    # ACR_IMAGES_COUNT=$((ACR_IMAGES_COUNT + RESOURCE_COUNT))
-    # echo "  Count of Artifact Registry Images: ${ACR_IMAGES_COUNT}"
-
-    # WORKLOAD_COUNT=$((COMPUTE_INSTANCES_COUNT + SQL_INSTANCES_COUNT + STORAGE_COUNT + FILESTORE_COUNT + BIGQUERY_COUNT + BIGTABLE_COUNT + SPANNER_COUNT + REDIS_COUNT + MEMCACHE_COUNT + FIRESTORE_COUNT))
-    # echo "Total billable resources for Project ${PROJECTS[$PROJECT_INDEX]}: ${WORKLOAD_COUNT}"
-    echo "###################################################################################"
-    echo ""
-
-    COMPUTE_INSTANCES_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + COMPUTE_INSTANCES_COUNT))
-    SQL_INSTANCES_COUNT_GLOBAL=$((SQL_INSTANCES_COUNT_GLOBAL + SQL_INSTANCES_COUNT))
-    STORAGE_COUNT_GLOBAL=$((STORAGE_COUNT_GLOBAL + STORAGE_COUNT))
-    FILESTORE_COUNT_GLOBAL=$((FILESTORE_COUNT_GLOBAL + FILESTORE_COUNT))
-    BIGQUERY_COUNT_GLOBAL=$((BIGQUERY_COUNT_GLOBAL + BIGQUERY_COUNT))
-    BIGTABLE_COUNT_GLOBAL=$((BIGTABLE_COUNT_GLOBAL + BIGTABLE_COUNT))
-    SPANNER_COUNT_GLOBAL=$((SPANNER_COUNT_GLOBAL + SPANNER_COUNT))
-    REDIS_COUNT_GLOBAL=$((REDIS_COUNT_GLOBAL + REDIS_COUNT))
-    MEMCACHE_COUNT_GLOBAL=$((MEMCACHE_COUNT_GLOBAL + MEMCACHE_COUNT))
-    FIRESTORE_COUNT_GLOBAL=$((FIRESTORE_COUNT_GLOBAL + FIRESTORE_COUNT))
-    CLOUD_FUNCTIONS_COUNT_GLOBAL=$((CLOUD_FUNCTIONS_COUNT_GLOBAL + CLOUD_FUNCTIONS_COUNT))
-    CLOUD_RUN_COUNT_GLOBAL=$((CLOUD_RUN_COUNT_GLOBAL + CLOUD_RUN_COUNT))
-    ACR_IMAGES_COUNT_GLOBAL=$((ACR_IMAGES_COUNT_GLOBAL + ACR_IMAGES_COUNT))
-
-    reset_project_counters
-  done
-
-  echo "###################################################################################"
-  echo "Totals for all projects"
-  echo "  Count of Running Compute Instances: ${COMPUTE_INSTANCES_COUNT_GLOBAL}"
-  echo "  Count of SQL Instances: ${SQL_INSTANCES_COUNT_GLOBAL}"
-  echo "  Count of Storage Buckets: ${STORAGE_COUNT_GLOBAL}"
-  echo "  Count of Filestore: ${FILESTORE_COUNT_GLOBAL}"
-  echo "  Count of BigQuery: ${BIGQUERY_COUNT_GLOBAL}"
-  echo "  Count of BigTable: ${BIGTABLE_COUNT_GLOBAL}"
-  echo "  Count of Spanner: ${SPANNER_COUNT_GLOBAL}"
-  echo "  Count of Redis: ${REDIS_COUNT_GLOBAL}"
-  echo "  Count of Memcache: ${MEMCACHE_COUNT_GLOBAL}"
-  echo "  Count of Firestore: ${FIRESTORE_COUNT_GLOBAL}"
-  echo "  Count of Cloud Functions: ${CLOUD_FUNCTIONS_COUNT_GLOBAL}"
-  echo "  Count of Cloud Run Services: ${CLOUD_RUN_COUNT_GLOBAL}"
-  echo "  Count of Artifact Registry Images: ${ACR_IMAGES_COUNT_GLOBAL}"
-
-  # WORKLOAD_COUNT_GLOBAL=$((COMPUTE_INSTANCES_COUNT_GLOBAL + SQL_INSTANCES_COUNT_GLOBAL + STORAGE_COUNT_GLOBAL + FILESTORE_COUNT_GLOBAL + BIGQUERY_COUNT_GLOBAL + BIGTABLE_COUNT_GLOBAL + SPANNER_COUNT_GLOBAL + REDIS_COUNT_GLOBAL + MEMCACHE_COUNT_GLOBAL + FIRESTORE_COUNT_GLOBAL))
-  # echo "Total billable resources for all projects: ${WORKLOAD_COUNT_GLOBAL}"
-  echo "###################################################################################"
-}
-
-##########################################################################################
-# Allow shellspec to source this script.
-##########################################################################################
-
-${__SOURCED__:+return}
-
-##########################################################################################
-# Main.
-##########################################################################################
-
-get_project_list
-reset_project_counters
-reset_global_counters
-count_project_resources
+echo "-------------------------------------------------------"
+echo "DETAILED RESOURCE COUNT"
+echo "-------------------------------------------------------"
+printf "Compute (Running): %d\nSQL Instances:     %d\nStorage Buckets:   %d\nFilestore:         %d\nBigQuery Datasets: %d\nBigTable:          %d\nSpanner:           %d\nRedis:             %d\nMemcache:          %d\nFirestore:         %d\nCloud Functions:   %d\nCloud Run:         %d\nArtifact Images:   %d\n" \
+$G_COMPUTE $G_SQL $G_STORAGE $G_FILER $G_BQ $G_BT $G_SPANNER $G_REDIS $G_MEM $G_FS $G_FUNC $G_RUN $G_ART
+echo "-------------------------------------------------------"
+echo "GRAND TOTAL OF ALL RESOURCES: $GRAND_TOTAL"
+echo "-------------------------------------------------------"
