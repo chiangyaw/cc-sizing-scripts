@@ -152,6 +152,36 @@ def get_configured_aks_node_count(subscription_id, subscription_name):
     return total_potential_nodes
 
 
+def run_az_json(cmd, description):
+    """
+    Run an Azure CLI command and parse its stdout as JSON.
+
+    stderr is captured SEPARATELY (not merged with '2>&1') so that Azure CLI
+    warnings, deprecation notices, or re-authentication messages do not corrupt
+    the JSON stream. On failure, prints a clear diagnostic and exits.
+    """
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    stdout = (result.stdout or '').strip()
+    stderr = (result.stderr or '').strip()
+
+    if not stdout:
+        print(f"  [ERROR] {description} returned no output.")
+        if stderr:
+            print(f"          Azure CLI said: {stderr}")
+        print("          Make sure you are logged in ('az login') and the Azure CLI is available.")
+        sys.exit(1)
+
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as e:
+        print(f"  [ERROR] {description} did not return valid JSON: {e}")
+        if stderr:
+            print(f"          Azure CLI said: {stderr}")
+        # Show a short snippet of the offending output to aid debugging.
+        print(f"          Output was: {stdout[:200]}")
+        sys.exit(1)
+
+
 # --- Command-line options ---
 parser = argparse.ArgumentParser(
     description="Count Azure resources for Cortex Cloud licensing/sizing."
@@ -181,20 +211,17 @@ args = parser.parse_args()
 # Fetch subscriptions. Refresh the token cache by default so subscriptions
 # granted after the last 'az login' are picked up.
 refresh_flag = '' if args.no_refresh else '--refresh '
-az_account_list = json.loads(
-    subprocess.getoutput('az account list --all {}--output json 2>&1'.format(refresh_flag))
+az_account_list = run_az_json(
+    'az account list --all {}--output json'.format(refresh_flag),
+    "'az account list'"
 )
 
 # Build the set of subscription IDs/names to include, if the user scoped the run.
 requested_subscriptions = set(args.subscription) if args.subscription else None
 if args.current:
-    try:
-        current = json.loads(subprocess.getoutput('az account show --output json 2>&1'))
-        requested_subscriptions = requested_subscriptions or set()
-        requested_subscriptions.add(current['id'])
-    except Exception as e:
-        print("  [ERROR] Could not determine the current subscription: {}".format(e))
-        sys.exit(1)
+    current = run_az_json('az account show --output json', "'az account show'")
+    requested_subscriptions = requested_subscriptions or set()
+    requested_subscriptions.add(current['id'])
 
 for az_account in az_account_list:
     # Skip subscriptions that are not active (Disabled/Deleted/Expired). Note:
