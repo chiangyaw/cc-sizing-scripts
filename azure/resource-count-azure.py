@@ -70,7 +70,8 @@ RESOURCE_TO_CATEGORY = {
     'microsoft.dbforpostgresql/servergroupsv2' : 'Managed Cloud Database (PaaS)',
     'microsoft.dbforpostgresql/flexibleservers' : 'Managed Cloud Database (PaaS)',
     'microsoft.dbforpostgresql/servers' : 'Managed Cloud Database (PaaS)',
-    
+    'microsoft.dbformariadb/servers' : 'Managed Cloud Database (PaaS)',
+
     # 7. Container Registries (ACR)
     'microsoft.containerregistry/registries': 'Container Registries (ACR)',
     
