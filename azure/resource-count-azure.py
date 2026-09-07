@@ -16,15 +16,31 @@
 # - Use Cloud Shell (Bash)
 # - Upload the script
 # - Run the script:
-#       python3 resource-count-azure.py
+#       python3 resource-count-azure.py                 # all accessible subscriptions
+#       python3 resource-count-azure.py --current       # active subscription only
+#       python3 resource-count-azure.py -s <SUB_ID>     # one specific subscription
+#       python3 resource-count-azure.py -s <ID> -s <ID> # several subscriptions
+#       python3 resource-count-azure.py --no-refresh    # skip subscription cache refresh
 #
-# Change: The 'Container Hosts (AKS Clusters)' count is now the sum of the 
+# Notes:
+# - By default the subscription cache is refreshed (az account list --refresh) so
+#   newly granted subscriptions/tenants are included. Use --no-refresh to skip.
+# - Active subscriptions in ANY of Enabled/Warned/PastDue states are counted;
+#   only Disabled/Deleted/Expired subscriptions are skipped.
+#
+# Change: The 'Container Hosts (AKS Clusters)' count is now the sum of the
 #         **maxCount** of all agentPoolProfiles. If maxCount is null, it uses **count**.
 ##########################################
 
 import subprocess
 import json
 import sys
+import argparse
+
+# Azure subscription states that represent an ACTIVE subscription whose
+# resources are still deployed/billable and therefore in scope for licensing.
+# Only truly inactive subscriptions (Disabled/Deleted/Expired) are skipped.
+ACTIVE_SUBSCRIPTION_STATES = {'Enabled', 'Warned', 'PastDue'}
 
 # --- Comprehensive Resource Mapping for Categorization ---
 RESOURCE_TO_CATEGORY = {
@@ -75,6 +91,17 @@ global_totals = {
 }
 error_list = []
 
+# Canonical print / summary order for all resource categories.
+requested_order = [
+    'Virtual Machines (VMs)',
+    'Container Hosts (AKS Clusters)',
+    'Container as a Service (CaaS)',
+    'Serverless Functions',
+    'Cloud Buckets (Storage Accounts)',
+    'Managed Cloud Database (PaaS)',
+    'Container Registries (ACR)'
+]
+
 
 def get_configured_aks_node_count(subscription_id, subscription_name):
     """
@@ -124,13 +151,63 @@ def get_configured_aks_node_count(subscription_id, subscription_name):
     return total_potential_nodes
 
 
-# Fetch all subscriptions
-az_account_list = json.loads(subprocess.getoutput('az account list --all --output json 2>&1'))
+# --- Command-line options ---
+parser = argparse.ArgumentParser(
+    description="Count Azure resources for Cortex Cloud licensing/sizing."
+)
+parser.add_argument(
+    '-s', '--subscription',
+    action='append',
+    metavar='SUBSCRIPTION_ID',
+    help="Scope the count to a single subscription (by ID or name). Repeat the "
+         "flag to include several. When omitted, ALL accessible subscriptions "
+         "in the tenant are counted."
+)
+parser.add_argument(
+    '--current',
+    action='store_true',
+    help="Scope the count to the currently active subscription only "
+         "(i.e. the one from 'az account show')."
+)
+parser.add_argument(
+    '--no-refresh',
+    action='store_true',
+    help="Skip 'az account list --refresh'. By default the local subscription "
+         "cache is refreshed so newly granted subscriptions are included."
+)
+args = parser.parse_args()
+
+# Fetch subscriptions. Refresh the token cache by default so subscriptions
+# granted after the last 'az login' are picked up.
+refresh_flag = '' if args.no_refresh else '--refresh '
+az_account_list = json.loads(
+    subprocess.getoutput('az account list --all {}--output json 2>&1'.format(refresh_flag))
+)
+
+# Build the set of subscription IDs/names to include, if the user scoped the run.
+requested_subscriptions = set(args.subscription) if args.subscription else None
+if args.current:
+    try:
+        current = json.loads(subprocess.getoutput('az account show --output json 2>&1'))
+        requested_subscriptions = requested_subscriptions or set()
+        requested_subscriptions.add(current['id'])
+    except Exception as e:
+        print("  [ERROR] Could not determine the current subscription: {}".format(e))
+        sys.exit(1)
 
 for az_account in az_account_list:
-    if az_account['state'] != 'Enabled':
+    # Skip subscriptions that are not active (Disabled/Deleted/Expired). Note:
+    # Warned and PastDue subscriptions are still active/billable and ARE counted.
+    if az_account['state'] not in ACTIVE_SUBSCRIPTION_STATES:
         continue
-        
+
+    # Apply subscription scoping (--subscription / --current), if requested.
+    if requested_subscriptions is not None and (
+        az_account['id'] not in requested_subscriptions
+        and az_account['name'] not in requested_subscriptions
+    ):
+        continue
+
     subscription_name = az_account['name']
     subscription_id = az_account['id']
 
@@ -215,17 +292,7 @@ for az_account in az_account_list:
     # 3. Print Subscription Summary and Update Globals
     # ---------------------------------------------------------
     print("\n--- Subscription Resource Census ---")
-    
-    requested_order = [
-        'Virtual Machines (VMs)', 
-        'Container Hosts (AKS Clusters)', 
-        'Container as a Service (CaaS)', 
-        'Serverless Functions', 
-        'Cloud Buckets (Storage Accounts)', 
-        'Managed Cloud Database (PaaS)', 
-        'Container Registries (ACR)'
-    ]
-    
+
     # Print the main categories
     for category in requested_order:
         count = sub_census.get(category, 0)
@@ -238,17 +305,57 @@ for az_account in az_account_list:
 # 4. Grand Total Summary
 # ---------------------------------------------------------
 print('\n###################################################################################')
-print("--- GRAND TOTALS ACROSS ALL ENABLED SUBSCRIPTIONS ---")
+print("--- GRAND TOTALS ACROSS ALL COUNTED SUBSCRIPTIONS ---")
 
 # Print in the requested order
 for category in requested_order:
     print(f"Grand Total {category}: {global_totals[category]}")
 
 print('###################################################################################')
+
+# ---------------------------------------------------------
+# 5. Cortex Cloud Licensing Summary
+#
+# Maps the raw resource counts above onto the billable "Protected workloads"
+# categories from the Cortex Cloud Runtime Security license plans:
+#   https://cortex-docs.paloaltonetworks.com/cortex-cloud-runtime-security/get-started/understand-license-plans
+#
+# Billable workload types (and their billing unit) relevant to Azure infra:
+#   - VMs (running or not running containers) ... 1 VM per unit
+#       AKS nodes are VMs running containers and are NOT returned by 'az vm list'
+#       (they live in the MC_* managed resource group), so they are added here.
+#   - CaaS ..................................... 10 managed containers per unit
+#   - Cloud Buckets ........................... 10 buckets per unit
+#   - Managed Cloud Database (PaaS) ........... 2 PaaS databases per unit
+#   - Container Images in Registries .......... 10 image scans per deployed workload
+#
+# Serverless Functions are NOT a billable Cortex Cloud workload type; they are
+# reported above for reference only and are excluded from the licensing summary.
+# ---------------------------------------------------------
+billable_vms = global_totals['Virtual Machines (VMs)'] + global_totals['Container Hosts (AKS Clusters)']
+
+print('\n###################################################################################')
+print("--- CORTEX CLOUD LICENSING SUMMARY (billable workloads) ---")
+print(f"VMs (billable as 'VMs', 1 unit each): {billable_vms}")
+print(f"    - Standalone VMs:                 {global_totals['Virtual Machines (VMs)']}")
+print(f"    - AKS nodes (VMs running containers): {global_totals['Container Hosts (AKS Clusters)']}")
+print(f"CaaS Containers (10 per unit):        {global_totals['Container as a Service (CaaS)']}")
+print(f"Cloud Buckets (10 per unit):          {global_totals['Cloud Buckets (Storage Accounts)']}")
+print(f"Managed Cloud Databases / PaaS (2 per unit): {global_totals['Managed Cloud Database (PaaS)']}")
+print(f"Container Registries -> Container Images in Registries: {global_totals['Container Registries (ACR)']}")
+print("---")
+print(f"Serverless Functions (NOT a billable Cortex Cloud workload; reference only): {global_totals['Serverless Functions']}")
+print('###################################################################################')
+
+print('###################################################################################')
 print("Note: The 'Virtual Machines' total includes all states (Running, Stopped, Deallocated, etc.).")
+print("Note: For Cortex Cloud licensing, AKS nodes count as 'VMs running containers' and are")
+print("      combined with standalone VMs into the billable VM total above.")
 print("Note: 'Container Hosts (AKS Clusters)' reports the total potential node count (maxCount for autoscale or count for manual).")
 print("Note: 'Cloud Buckets' counts Storage Accounts (excluding Classic/ADLS Gen1).")
-print("Note: 'Container Registries (ACR)' counts the total ACR found, not total container image due to Azure API limitation.")
+print("Note: 'Container Registries (ACR)' counts the total ACR found, not total container images, due to Azure API limitation.")
+print("Note: DBaaS-TB-Stored, Endpoints, SaaS Users, On-Premise Data assets, and Cloud ASM are")
+print("      billable Cortex Cloud categories that cannot be derived from 'az resource list' and are out of scope here.")
 print()
 
 if error_list:
