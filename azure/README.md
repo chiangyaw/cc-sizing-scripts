@@ -28,20 +28,44 @@ The Azure CLI commands below are used to gather information from Azure:
 * `az vm list`
 * `az aks list`
 
-## Running the Script
+## Running the Script from Azure Cloud Shell
 
-Follow the steps below to run the script.
+Azure Cloud Shell already has `python3`, `jq`, `az`, and `git` prepared, which makes it the easiest place to run the script.
 
-1. Download the sizing script to your local computer
-    1. [resource-count-azure.py](resource-count-azure.py)
-1. Log into your Azure Console
-1. Launch Azure Cloud Shell
-1. Select "Bash" as your shell in your Azure Console
-1. Click the "Upload/Download Files" button to upload the sizing script
+1. Log into the [Azure Portal](https://portal.azure.com)
+1. Launch **Azure Cloud Shell** and select **Bash** as the shell
+1. Clone this repository and change into the Azure directory:
+   ```bash
+   git clone https://github.com/chiangyaw/cc-sizing-scripts.git
+   cd cc-sizing-scripts/azure
+   ```
 1. Run the sizing script (see options below)
 1. Share the results with your Palo Alto Networks team
 
-### Command Options
+> Alternatively, you can download [resource-count-azure.py](resource-count-azure.py) and use the Cloud Shell "Upload/Download Files" button instead of `git clone`.
+
+## Counting an Entire Azure Tenant
+
+By default (no arguments) the script counts **every subscription the signed-in identity can access**, which is how you size a whole tenant:
+
+```bash
+python3 resource-count-azure.py
+```
+
+For this to truly cover the entire tenant, keep the following in mind:
+
+- **Permissions:** The signed-in identity must have at least **Reader** on every subscription you want counted. Subscriptions the identity cannot see are not returned by `az account list` and therefore cannot be counted. For tenant-wide coverage, use an account with Reader assigned at the **root management group** (or use [elevated access](https://learn.microsoft.com/azure/role-based-access-control/elevate-access-global-admin) to assign it).
+- **Cache refresh:** The script runs `az account list --refresh` by default so subscriptions granted after your last `az login` are included. Use `--no-refresh` only if the refresh prompts for interactive re-authentication.
+- **Subscription states:** Subscriptions in `Enabled`, `Warned`, or `PastDue` states are all counted (they remain billable). Only `Disabled`/`Deleted`/`Expired` subscriptions are skipped.
+- **Scope note:** The script enumerates subscriptions directly; it does not traverse management groups. Coverage is therefore determined by the RBAC of the signed-in identity, not by management-group hierarchy.
+
+To confirm which subscriptions will be counted before running, list them with:
+
+```bash
+az account list --all --refresh --output table
+```
+
+## Command Options
 
 ```bash
 # Count ALL accessible subscriptions in the tenant (default).

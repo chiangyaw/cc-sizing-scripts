@@ -56,11 +56,52 @@ https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_accounts_
 
 ## Running the Script from AWS Cloud Shell
 
-1. Start a Cloud Shell session from the AWS UI, which should have the AWS CLI tool, your credentials, ```git``` and ``jq`` already prepared
-2. Clone this repository, e.g. ```git clone https://github.com/chiangyaw/cc-sizing-scripts.git```
-3. ```cd cc-sizing-scripts/aws```
-4. ```chmod +x  resource-count-aws.sh```
-5. ```./resource-count-aws.sh```
+AWS Cloud Shell already has the AWS CLI, your credentials, `git`, and `jq` prepared, which makes it the easiest place to run the script.
+
+### Option A — Single account (the account you are logged into)
+
+1. Start a Cloud Shell session from the AWS UI
+2. Clone this repository:
+   ```bash
+   git clone https://github.com/chiangyaw/cc-sizing-scripts.git
+   ```
+3. Change into the AWS directory:
+   ```bash
+   cd cc-sizing-scripts/aws
+   ```
+4. Make the script executable:
+   ```bash
+   chmod +x resource-count-aws.sh
+   ```
+5. Run the script:
+   ```bash
+   ./resource-count-aws.sh
+   ```
+
+### Option B — Entire AWS Organization (all member accounts)
+
+Run this from **AWS Cloud Shell in your Organization's management (payer) account** so the script can enumerate member accounts and assume a role into each one. A single `org` run covers every account in the organization — you do **not** need to run the script separately per account.
+
+**Prerequisites for org-wide runs:**
+- You are signed in to the **management account** (or an account delegated for AWS Organizations) with permission to call `organizations:DescribeOrganization` and `organizations:ListAccounts`.
+- Each member account has the `OrganizationAccountAccessRole` (created automatically for accounts provisioned by the organization), and your identity can `sts:AssumeRole` into it. See [AWS Organizations access role docs](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_accounts_access.html).
+
+Steps:
+
+1. Start a Cloud Shell session from the AWS UI **in the management account**
+2. Clone the repository and change into the AWS directory:
+   ```bash
+   git clone https://github.com/chiangyaw/cc-sizing-scripts.git
+   cd cc-sizing-scripts/aws
+   chmod +x resource-count-aws.sh
+   ```
+3. Run the script in organization mode:
+   ```bash
+   ./resource-count-aws.sh org
+   ```
+4. The script prints the number of member accounts found, processes each one, and reports per-account and grand-total resource counts.
+
+> Tip: `org` can be combined with the other optional arguments, e.g. `./resource-count-aws.sh org cwp`. Accounts where the assume-role fails (e.g. the role does not exist) are logged as a warning and skipped, so review the output to confirm full coverage.
 
 ## Running the Script on Windows
 
@@ -117,7 +158,7 @@ Follow the steps below to run the Cortex Cloud AWS License Sizing Script on Wind
         1. `./resource-count-aws.sh`
 1. Share the results with your Palo Alto Networks Team
     1. Share the output from the licensing script with your Palo Alto Networks team
-    1. Remember to run the sizing script for each AWS account in your environment, and share the output from each account
+    1. To cover an entire AWS Organization in one run, use organization mode from the management account (`./resource-count-aws.sh org`) — see "Running the Script from AWS Cloud Shell". Otherwise, run the script for each AWS account and share the output from each.
 
 ## Running the Script on Mac OSX or Linux
 
@@ -160,4 +201,4 @@ Follow the steps below to install prerequisites, if you plan to run the script o
         1. `./resource-count-aws.sh`
 1. Share the results with your Palo Alto Networks Team
     1. Share the output from the licensing script with your Palo Alto Networks team
-    1. Remember to run the sizing script for each AWS account in your environment, and share the output from each account
+    1. To cover an entire AWS Organization in one run, use organization mode from the management account (`./resource-count-aws.sh org`) — see "Running the Script from AWS Cloud Shell". Otherwise, run the script for each AWS account and share the output from each.

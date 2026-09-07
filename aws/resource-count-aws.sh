@@ -263,7 +263,8 @@ aws_ecr_describe_images() {
 
 get_ecs_fargate_task_count() {
   REGION=$1
-  ECS_FARGATE_CLUSTERS=$(aws_ecs_list_clusters "${REGION}")
+  # Extract cluster ARNs from the JSON response (not the raw JSON lines).
+  ECS_FARGATE_CLUSTERS=$(aws_ecs_list_clusters "${REGION}" | jq -r '.clusterArns[]?' 2>/dev/null)
 
   XIFS=$IFS
   # shellcheck disable=SC2206
@@ -275,7 +276,8 @@ get_ecs_fargate_task_count() {
 
   for CLUSTER in "${ECS_FARGATE_CLUSTERS_LIST[@]}"
   do
-    ECS_FARGATE_TASK_LIST_COUNT=($(aws_ecs_list_tasks "${REGION}" --cluster "${CLUSTER}" --desired-status running --output json | jq -r '[.taskArns[]] | length' 2>/dev/null))
+    # aws_ecs_list_tasks expects (region, cluster) as positional args.
+    ECS_FARGATE_TASK_LIST_COUNT=$(aws_ecs_list_tasks "${REGION}" "${CLUSTER}" | jq -r '[.taskArns[]?] | length' 2>/dev/null)
     RESULT=$((RESULT + ECS_FARGATE_TASK_LIST_COUNT))
   done
   echo "${RESULT}"
